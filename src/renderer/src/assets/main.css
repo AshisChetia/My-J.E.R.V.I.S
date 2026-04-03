@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#020b13] overflow-hidden text-cyan-400 font-mono select-none;
+    /* The eDEX-UI/Stark Background Texture */
+    background: 
+      radial-gradient(circle at center, #041a2b 0%, #020b13 100%),
+      linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%),
+      linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+    background-size: 100%, 100% 4px, 3px 100%;
+  }
+}
+
+.hud-panel {
+  @apply border border-cyan-500/20 bg-cyan-950/10 backdrop-blur-md relative overflow-hidden;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+}
+
+.hud-panel::before {
+  content: '';
+  @apply absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent;
+}
+
+@keyframes scan {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(100%); }
+}
+
+.scan-line {
+  animation: scan 4s linear infinite;
+}

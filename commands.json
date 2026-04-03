@@ -1,0 +1,17 @@
+{
+  "open_editor": {
+    "keywords": ["open workspace", "start coding", "open code"],
+    "action": "code .",
+    "reply": "Of course. Initializing the workspace now."
+  },
+  "open_github": {
+    "keywords": ["open github", "show my repos"],
+    "action": "start chrome https://github.com",
+    "reply": "Opening your GitHub profile. Your repositories are looking sharp today."
+  },
+  "open_youtube": {
+    "keywords": ["open youtube", "play music"],
+    "action": "start chrome https://youtube.com",
+    "reply": "Right away. Enjoy your session."
+  }
+}

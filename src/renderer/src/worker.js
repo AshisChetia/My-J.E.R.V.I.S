@@ -4,12 +4,11 @@ env.allowLocalModels = false;
 
 class PipelineSingleton {
     static task = 'automatic-speech-recognition';
-    static model = 'Xenova/whisper-tiny.en';
+    static model = 'Xenova/whisper-base.en';
     static instance = null;
 
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
-            // Removed WebGPU. Falling back to ultra-stable WASM/CPU.
             this.instance = await pipeline(this.task, this.model, { progress_callback });
         }
         return this.instance;
@@ -30,7 +29,6 @@ self.addEventListener('message', async (event) => {
         self.postMessage({ status: 'success', text: output.text });
 
     } catch (error) {
-         // This will now catch any crashes and send them back to the UI
          self.postMessage({ status: 'error', message: error.toString() });
     }
 });

@@ -4,7 +4,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 const api = {
   // Existing commands...
   executeVoiceCommand: (text) => ipcRenderer.send('execute-voice-command', text),
-  onReply: (callback) => ipcRenderer.on('jarvis-reply', (_event, message) => callback(message)),
+  onReply: (callback) => {
+    ipcRenderer.removeAllListeners('jarvis-reply') // Deletes ghost listeners
+    ipcRenderer.on('jarvis-reply', (_event, message) => callback(message))
+  },
   
   // ADD THIS NEW LISTENER:
   onStartListening: (callback) => ipcRenderer.on('start-listening', () => callback())

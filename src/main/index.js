@@ -4,20 +4,24 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
 import { exec } from 'child_process'
 
+app.commandLine.appendSwitch('log-level', '3')
+app.commandLine.appendSwitch('silent-debugger-extension-api')
+
 let mainWindow;
 
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay()
-  const { width } = primaryDisplay.workAreaSize
+  // Grab BOTH width and height now
+  const { width, height } = primaryDisplay.workAreaSize 
 
   mainWindow = new BrowserWindow({
     width: width,
-    height: 200,       
+    height: height,    // <--- Changed this to full screen height
     x: 0,
     y: 0,
     show: false,       
     frame: false,      
-    transparent: true, 
+    transparent: true, // <--- This guarantees the OS background is completely invisible
     alwaysOnTop: true, 
     skipTaskbar: true, 
     hasShadow: false,
@@ -58,7 +62,8 @@ app.whenReady().then(() => {
 
 // --- THE MISSING COMMAND ENGINE ---
 ipcMain.on('execute-voice-command', (event, transcribedText) => {
-  const cleanText = transcribedText.toLowerCase().replace(/[.,!?]/g, "").trim()
+
+  const cleanText = transcribedText.toLowerCase().replace(/['".,!?\-]/g, "").trim()
   console.log(`\n>>> J.A.R.V.I.S. HEARD: "${cleanText}"`)
 
   if (cleanText.length < 2) return;
@@ -72,13 +77,24 @@ ipcMain.on('execute-voice-command', (event, transcribedText) => {
       const isMatch = cmd.keywords.some(keyword => cleanText.includes(keyword.toLowerCase()))
       
       if (isMatch) {
-        console.log(`>>> EXECUTING ACTION: '${cmd.action}'`)
-        exec(cmd.action, (error) => {
-          if (error) console.error(`Command failed: ${error.message}`)
-        })
+        // 1. THE MACRO UPGRADE: 
+        // Force the action into an Array. If it's already an array, keep it. 
+        // If it's a single string, wrap it in brackets so the loop still works.
+        const actionsToRun = Array.isArray(cmd.action) ? cmd.action : [cmd.action];
+        
+        console.log(`>>> EXECUTING MACRO: Running ${actionsToRun.length} action(s)`)
+
+        // 2. Loop through every command and execute them simultaneously
+        actionsToRun.forEach(actionString => {
+            exec(actionString, (error) => {
+              if (error) console.error(`>>> COMMAND FAILED (${actionString}): ${error.message}`)
+            })
+        });
+
+        // 3. Send the single voice reply back to the UI
         event.sender.send('jarvis-reply', cmd.reply)
         matched = true;
-        break;
+        break; 
       }
     }
     if (!matched) console.log(">>> NO MATCH FOUND IN COMMANDS.JSON")

@@ -2,70 +2,112 @@ import { useState, useEffect, useRef } from 'react'
 
 export default function App() {
   const [isListening, setIsListening] = useState(false)
-  const [intensity, setIntensity] = useState(0)
   
+  // Hardware & Logic Locks
+  const activeStreamRef = useRef(null)
+  const workerRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
-  const workerRef = useRef(null)
-  const analyserRef = useRef(null)
-  
-  // Synchronous Locks to prevent the "Always On" leak
-  const activeStreamRef = useRef(null) 
-  const isMicLocked = useRef(false)
+  const isPressingRef = useRef(false) 
   const animationRef = useRef(null)
+  const lastSpokenRef = useRef(0)
 
+  // Direct DOM Refs for 60fps Sci-Fi Animation
+  const path1Ref = useRef(null)
+  const path2Ref = useRef(null)
+  const path3Ref = useRef(null)
+
+  // 1. Setup Local AI Worker & TTS
   useEffect(() => {
-    // Fixed path: './worker.js' since it is in the same folder as App.jsx
     workerRef.current = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
     
     workerRef.current.onmessage = (e) => {
       if (e.data.status === 'success') {
-         console.log("AI Heard:", e.data.text)
          window.api?.executeVoiceCommand(e.data.text)
-      } else if (e.data.status === 'error') {
-         console.error("AI Crash:", e.data.message)
       }
     }
 
     if (window.api?.onReply) {
       window.api.onReply((replyText) => {
+        const now = Date.now()
+        if (now - lastSpokenRef.current < 2000) return; 
+        lastSpokenRef.current = now;
+
+        window.speechSynthesis.cancel() 
         const speech = new SpeechSynthesisUtterance(replyText)
+        speech.pitch = 0.8 // Lowered pitch for a slightly more intimidating voice
+        speech.rate = 1.1
         window.speechSynthesis.speak(speech)
       })
     }
     return () => workerRef.current?.terminate()
   }, [])
 
+  // 2. Start Hardware & Animation
   const startMic = async () => {
-    // SYNCHRONOUS LOCK: Blocks keyboard spam instantly
-    if (isMicLocked.current || activeStreamRef.current) return; 
-    isMicLocked.current = true;
-    setIsListening(true);
+    if (isPressingRef.current || activeStreamRef.current) return; 
+    isPressingRef.current = true;
+    setIsListening(true); 
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      
+      if (!isPressingRef.current) {
+         stream.getTracks().forEach(t => t.stop());
+         setIsListening(false);
+         return;
+      }
+
       activeStreamRef.current = stream
 
       const audioCtx = new window.AudioContext()
       const source = audioCtx.createMediaStreamSource(stream)
-      analyserRef.current = audioCtx.createAnalyser()
-      analyserRef.current.fftSize = 64
-      source.connect(analyserRef.current)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 64
+      source.connect(analyser)
       
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      
+      // Bypasses React for buttery 60fps animation
       const loop = () => {
-        analyserRef.current?.getByteFrequencyData(dataArray)
+        analyser.getByteFrequencyData(dataArray)
         const avg = dataArray.reduce((a, b) => a + b) / dataArray.length
-        setIntensity(avg)
+        const time = Date.now() / 150; 
+
+        const generateSpikyMesh = (offset, multiplier) => {
+          let d = "M 0 120 ";
+          for (let i = 0; i <= 600; i += 10) { 
+            const normX = i / 600;
+            const envelope = Math.sin(normX * Math.PI); 
+            const spike = Math.abs(Math.sin((normX * 25) - time + offset)); 
+            const y = 120 - (spike * envelope * (avg * 1.2 * multiplier));
+            d += `L ${i} ${y} `;
+          }
+          return d;
+        }
+
+        if (path1Ref.current) path1Ref.current.setAttribute('d', generateSpikyMesh(0, 0.6))
+        if (path2Ref.current) path2Ref.current.setAttribute('d', generateSpikyMesh(2, 0.9))
+        if (path3Ref.current) path3Ref.current.setAttribute('d', generateSpikyMesh(4, 1.3))
+
         animationRef.current = requestAnimationFrame(loop)
       }
       loop()
 
+      // Record Audio locally to bypass Google
       const recorder = new MediaRecorder(stream)
       recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data)
+      
       recorder.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
         audioChunksRef.current = [] 
+        
+        // Safely kill hardware after audio is secured
+        if (activeStreamRef.current) {
+            activeStreamRef.current.getTracks().forEach(track => track.stop())
+            activeStreamRef.current = null
+        }
+
         try {
             const decodeCtx = new window.AudioContext({ sampleRate: 16000 })
             const buffer = await blob.arrayBuffer()
@@ -78,37 +120,37 @@ export default function App() {
 
       mediaRecorderRef.current = recorder
       recorder.start()
+
     } catch (err) {
-      console.error("Mic Access Denied:", err)
-      isMicLocked.current = false;
+      console.error("Mic Error:", err)
+      isPressingRef.current = false;
       setIsListening(false);
     }
   }
 
+  // 3. Stop Hardware
   const stopMic = () => {
-    if (!isMicLocked.current) return;
-    isMicLocked.current = false;
-    setIsListening(false);
+    if (!isPressingRef.current) return;
+    isPressingRef.current = false;
+    setIsListening(false); 
+    cancelAnimationFrame(animationRef.current)
     
+    // Stop recording, which triggers recorder.onstop to send data to the AI
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     }
-    
-    // HARDWARE KILL SWITCH: Loops through all tracks and physically cuts power
-    if (activeStreamRef.current) {
-        activeStreamRef.current.getTracks().forEach(track => track.stop())
-        activeStreamRef.current = null
-    }
-    
-    cancelAnimationFrame(animationRef.current)
-    setIntensity(0)
+
+    // Flatten the 3D wave instantly
+    const flatPath = "M 0 120 L 600 120";
+    if (path1Ref.current) path1Ref.current.setAttribute('d', flatPath)
+    if (path2Ref.current) path2Ref.current.setAttribute('d', flatPath)
+    if (path3Ref.current) path3Ref.current.setAttribute('d', flatPath)
   }
 
+  // 4. Hotkeys
   useEffect(() => {
-    if (window.api?.onStartListening) {
-       window.api.onStartListening(() => startMic())
-    }
-
+    if (window.api?.onStartListening) window.api.onStartListening(() => startMic())
+    
     const handleKeyUp = (e) => {
       if (e.code === 'Space') stopMic()
     }
@@ -118,15 +160,53 @@ export default function App() {
   }, [])
 
   return (
-    <div className={`fixed top-0 left-0 w-full flex flex-col items-center justify-start transition-all duration-300 ${isListening ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0'}`}>
-      <div className="absolute top-0 w-[600px] h-32 bg-[#020b13]/90 backdrop-blur-md rounded-b-[40px] border-b border-cyan-500/30 shadow-[0_10px_50px_rgba(6,182,212,0.15)] -z-10" />
-      <h1 className="mt-6 text-3xl font-medium tracking-widest text-cyan-50 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]">Yes, Mon.</h1>
-      <div className="flex items-center justify-center gap-1.5 mt-4 h-12">
-        {[...Array(15)].map((_, i) => (
-          <div key={i} className="w-1 bg-cyan-400 rounded-full transition-all duration-75 shadow-[0_0_8px_#22d3ee]"
-               style={{ height: `${Math.min(4 + (intensity * (1 + (7 - Math.abs(7 - i)) * 0.3) * 0.5), 48)}px` }} />
-        ))}
+    <div className={`fixed inset-0 w-full h-full flex flex-col items-center justify-start pt-12 pointer-events-none transition-all duration-300 ease-out ${isListening ? 'translate-y-0 opacity-100 scale-100' : '-translate-y-10 opacity-0 scale-95'}`}>
+
+      {/* Minimalist System Status */}
+      <div className="flex items-center gap-3 mb-1 z-10 opacity-70">
+        <div className="text-[10px] font-['Share_Tech_Mono'] text-red-500 tracking-tighter uppercase">Status: Uplink_Active</div>
+        <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-ping" />
       </div>
+
+      {/* Sharp AI Identity */}
+      <div className="flex items-center mb-3 z-10">
+        <h1 className="text-2xl font-['Orbitron'] font-black tracking-[0.3em] uppercase text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-orange-500 to-red-600 drop-shadow-[0_0_10px_rgba(220,38,38,0.7)]">
+          Yes, Mon.
+        </h1>
+      </div>
+
+      {/* The Compact "Blade" Mesh Wave */}
+      <div className="relative z-10 w-[240px] h-[40px]">
+        <svg className="w-full h-full overflow-visible" viewBox="0 0 600 120" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="mesh-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#450a0a" /> 
+              <stop offset="50%" stopColor="#ef4444" /> 
+              <stop offset="100%" stopColor="#450a0a" />
+            </linearGradient>
+            <filter id="laser-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          {/* Background mesh shadow */}
+          <path ref={path1Ref} d="M 0 120 L 600 120" fill="none" stroke="url(#mesh-grad)" strokeWidth="1" opacity="0.3" />
+          {/* Main neon structure */}
+          <path ref={path2Ref} d="M 0 120 L 600 120" fill="none" stroke="url(#mesh-grad)" strokeWidth="3" opacity="0.8" filter="url(#laser-glow)" />
+          {/* White-hot laser core */}
+          <path ref={path3Ref} d="M 0 120 L 600 120" fill="none" stroke="#fff" strokeWidth="1" opacity="0.9" filter="url(#laser-glow)" />
+        </svg>
+      </div>
+
+      {/* HUD Meta-Data */}
+      <div className="mt-3 text-[8px] font-['Share_Tech_Mono'] text-red-600/50 tracking-[0.4em] uppercase z-10">
+        Trace_Route: 127.0.0.1 // encrypted.link
+      </div>
+      
     </div>
   )
 }

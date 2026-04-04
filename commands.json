@@ -1,17 +1,32 @@
 {
-  "open_editor": {
-    "keywords": ["open workspace", "start coding", "open code"],
-    "action": "code .",
+  "open_code": {
+    "keywords": [
+      "open workspace",
+      "open walkspace",
+      "open walks piece",
+      "start coding",
+      "open code"
+    ],
+    "action": [
+      "code .",
+      "start \"\" \"C:\\Users\\TUF\\AppData\\Local\\Postman\\Postman.exe\"",
+      "start \"\" \"C:\\Users\\TUF\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\MongoDB Inc\\MongoDB Compass.lnk\"",
+      "start chrome https://github.com/AshisChetia",
+      "start cmd",
+      "start spotify:"
+    ],
     "reply": "Of course. Initializing the workspace now."
   },
-  "open_github": {
-    "keywords": ["open github", "show my repos"],
-    "action": "start chrome https://github.com",
-    "reply": "Opening your GitHub profile. Your repositories are looking sharp today."
-  },
-  "open_youtube": {
-    "keywords": ["open youtube", "play music"],
-    "action": "start chrome https://youtube.com",
-    "reply": "Right away. Enjoy your session."
+  "open_social": {
+    "keywords": [
+      "open socials",
+      "open social media",
+      "open social",
+      "open my socials"
+    ],
+    "action": [
+      "start chrome https://www.linkedin.com/feed/"
+    ],
+    "reply": "Of course. Initializing the socials now."
   }
 }

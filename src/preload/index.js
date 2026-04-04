@@ -1,11 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-contextBridge.exposeInMainWorld('api', {
-  executeVoiceCommand: (text) => ipcRenderer.send('voice-command', text),
+// Expose secure APIs to the renderer (React)
+const api = {
+  // Existing commands...
+  executeVoiceCommand: (text) => ipcRenderer.send('execute-voice-command', text),
+  onReply: (callback) => ipcRenderer.on('jarvis-reply', (_event, message) => callback(message)),
   
-  // This function allows React to "listen" for the reply from the backend
-  onReply: (callback) => {
-    ipcRenderer.removeAllListeners('jarvis-reply'); // Clean up old listeners
-    ipcRenderer.on('jarvis-reply', (_event, value) => callback(value));
+  // ADD THIS NEW LISTENER:
+  onStartListening: (callback) => ipcRenderer.on('start-listening', () => callback())
+}
+
+if (process.contextIsolated) {
+  try {
+    contextBridge.exposeInMainWorld('api', api)
+  } catch (error) {
+    console.error(error)
   }
-})
+} else {
+  window.api = api
+}

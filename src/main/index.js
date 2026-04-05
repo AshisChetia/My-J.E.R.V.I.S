@@ -1,10 +1,11 @@
-import { app, shell, BrowserWindow, ipcMain, globalShortcut, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import fs from 'fs'
 import { exec } from 'child_process'
 import axios from 'axios'
 import os from 'os'
+import dotenv from 'dotenv';
+dotenv.config();
 
 app.commandLine.appendSwitch('log-level', '3')
 app.commandLine.appendSwitch('silent-debugger-extension-api')
@@ -13,19 +14,18 @@ let mainWindow;
 
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay()
-  // Grab BOTH width and height now
-  const { width, height } = primaryDisplay.workAreaSize 
+  const { width, height } = primaryDisplay.workAreaSize
 
   mainWindow = new BrowserWindow({
     width: width,
-    height: height,    // <--- Changed this to full screen height
+    height: height,    
     x: 0,
     y: 0,
-    show: false,       
-    frame: false,      
-    transparent: true, // <--- This guarantees the OS background is completely invisible
-    alwaysOnTop: true, 
-    skipTaskbar: true, 
+    show: false,
+    frame: false,
+    transparent: true, 
+    alwaysOnTop: true,
+    skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -62,66 +62,89 @@ app.whenReady().then(() => {
   })
 })
 
-// --- THE MISSING COMMAND ENGINE ---
-ipcMain.on('execute-voice-command', async (event, transcribedText) => {
-  const cleanText = transcribedText.toLowerCase().trim();
-  if (cleanText.length < 2) return;
+let chatHistory = [];
 
-  // 1. Fetch your actual Windows username and home path dynamically
+ipcMain.on('process-native-audio', async (event, base64Audio) => {
   const sysUser = os.userInfo().username;
   const homeDir = os.homedir(); 
 
-  console.log(`>>> J.A.R.V.I.S. Hearing: "${cleanText}"`);
+  const memoryString = chatHistory.join('\n');
+
+  console.log(`>>> J.A.R.V.I.S. is processing raw audio stream...`);
 
   try {
-    const response = await axios.post('http://localhost:11434/api/generate', {
-      model: 'gemma2:2b',
-      prompt: `You are J.A.R.V.I.S., but you act as a warm, encouraging best friend and helpful coding assistant.
-      The current user's name is "${sysUser}" and their main system directory is "${homeDir}".
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+        console.error(">>> ERROR: GEMINI_API_KEY is missing. Check your .env file!");
+        event.sender.send('jarvis-reply', "I cannot find my API key, Mon.");
+        return;
+    }
 
-      User input: "${cleanText}"
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-      RULES:
-      1. System Commands: If they want to open an app, website, or folder, output ONLY the Windows shell command. 
-         - Use exact paths using the directory provided. NEVER use placeholders like [USERNAME] or <username>.
-         - Example: "open github" -> COMMAND: start https://github.com
-         - Example: "open my movies" -> COMMAND: explorer "${homeDir}\\Videos"
-      2. Persona: Be friendly, casual, and highly supportive. Talk like a buddy helping them out.
-      3. Follow-up: Ask a brief, relevant follow-up question at the end of your reply to keep the interaction engaging.
-      4. CRITICAL: NO emojis, NO markdown, NO special characters. Plain English text only.
-      5. Respond EXACTLY in this format:
-      COMMAND: <shell_command_or_NONE>
-      REPLY: <your_voice_response>`,
-      stream: false,
-      keep_alive: "5m"
+    const response = await axios.post(url, {
+      systemInstruction: {
+        parts: [{ text: `You are J.A.R.V.I.S., but with the personality of a highly energetic, encouraging, and intensely curious best friend!
+        Current User: "${sysUser}" | Main Dir: "${homeDir}"
+        
+        RULES:
+        1. Listen to the audio to understand the user.
+        2. SYSTEM COMMANDS: If they explicitly ask to "open", "close", "start", or "launch" an app/folder, output ONLY the Windows shell command. Otherwise, COMMAND: NONE.
+        3. PERSONALITY: Be highly supportive and hyped up. Keep replies EXTREMELY short (1 to 2 sentences max).
+        4. CURIOSITY: ALWAYS end your response with a highly relevant, curious follow-up question.
+        5. FORMAT: You MUST respond EXACTLY like this:
+        HEARD: <what you heard the user say>
+        COMMAND: <shell_command_or_NONE>
+        REPLY: <your_voice_response>` }]
+      },
+      contents: [
+        {
+          parts: [
+            { text: `Recent Memory:\n${memoryString}\n\nListen to the user's voice in the attached audio and respond.` },
+            {
+              inlineData: {
+                mimeType: "audio/webm",
+                data: base64Audio
+              }
+            }
+          ]
+        }
+      ],
+      tools: [{ googleSearch: {} }] 
     });
 
-    const aiOutput = response.data.response;
-    const commandMatch = aiOutput.match(/COMMAND:\s*(.*)/i);
-    const replyMatch = aiOutput.match(/REPLY:\s*(.*)/i);
+    const aiOutput = response.data.candidates[0].content.parts[0].text;
+    
+    let heardMatch = aiOutput.match(/HEARD:\s*(.*)/i);
+    let commandMatch = aiOutput.match(/COMMAND:\s*(.*)/i);
+    let replyMatch = aiOutput.match(/REPLY:\s*(.*)/i);
 
-    let command = commandMatch ? commandMatch[1].trim() : "NONE";
-    let reply = replyMatch ? replyMatch[1].trim() : "I'm here for you, what's next?";
+    let heard = heardMatch ? heardMatch[1].trim() : "Audio received.";
+    let command = commandMatch ? commandMatch[1].replace(/^COMMAND:\s*/i, '').trim() : "NONE";
+    let reply = replyMatch ? replyMatch[1].trim() : "I've processed your request.";
 
-    // SANITIZER: Strips out any weird AI symbols so the voice engine doesn't crash
+    // Save to short-term memory
+    chatHistory.push(`User: ${heard}`);
+    chatHistory.push(`J.A.R.V.I.S.: ${reply}`);
+    if (chatHistory.length > 4) { chatHistory.shift(); chatHistory.shift(); }
+
     reply = reply.replace(/[^\w\s.,?!']/g, '').trim();
 
+    console.log(`>>> J.A.R.V.I.S. Hearing: "${heard}"`);
     console.log(`>>> AI COMMAND: ${command}`);
     console.log(`>>> AI REPLY: ${reply}`);
 
-    // EXECUTOR: Safely run commands
     if (command.toUpperCase() !== "NONE" && command !== "") {
       exec(command, (err) => {
         if (err) console.error("Execution error:", err.message);
       });
     }
 
-    // VOICE: Send the friendly reply to the UI
     event.sender.send('jarvis-reply', reply);
 
   } catch (err) {
-    console.error("Ollama Error:", err.message);
-    event.sender.send('jarvis-reply', "I seem to have lost my connection. Are you sure my brain is running?");
+    console.error("Gemini API Error:", err?.response?.data || err.message);
+    event.sender.send('jarvis-reply', "My audio sensors are offline, Mon.");
   }
 });
 

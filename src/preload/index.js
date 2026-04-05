@@ -2,15 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose secure APIs to the renderer (React)
 const api = {
-  // Existing commands...
   executeVoiceCommand: (text) => ipcRenderer.send('execute-voice-command', text),
+  
   onReply: (callback) => {
     ipcRenderer.removeAllListeners('jarvis-reply') // Deletes ghost listeners
     ipcRenderer.on('jarvis-reply', (_event, message) => callback(message))
   },
   
-  // ADD THIS NEW LISTENER:
-  onStartListening: (callback) => ipcRenderer.on('start-listening', () => callback())
+  onStartListening: (callback) => ipcRenderer.on('start-listening', () => callback()),
+
+  // THIS WAS MISSING: The secure audio bridge for Gemini
+  processNativeAudio: (base64Audio) => ipcRenderer.send('process-native-audio', base64Audio)
 }
 
 if (process.contextIsolated) {

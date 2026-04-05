@@ -3,6 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import fs from 'fs'
 import { exec } from 'child_process'
+import axios from 'axios'
+import os from 'os'
 
 app.commandLine.appendSwitch('log-level', '3')
 app.commandLine.appendSwitch('silent-debugger-extension-api')
@@ -61,48 +63,67 @@ app.whenReady().then(() => {
 })
 
 // --- THE MISSING COMMAND ENGINE ---
-ipcMain.on('execute-voice-command', (event, transcribedText) => {
-
-  const cleanText = transcribedText.toLowerCase().replace(/['".,!?\-]/g, "").trim()
-  console.log(`\n>>> J.A.R.V.I.S. HEARD: "${cleanText}"`)
-
+ipcMain.on('execute-voice-command', async (event, transcribedText) => {
+  const cleanText = transcribedText.toLowerCase().trim();
   if (cleanText.length < 2) return;
 
+  // 1. Fetch your actual Windows username and home path dynamically
+  const sysUser = os.userInfo().username;
+  const homeDir = os.homedir(); 
+
+  console.log(`>>> J.A.R.V.I.S. Hearing: "${cleanText}"`);
+
   try {
-    const commandsPath = join(__dirname, '../../commands.json')
-    const commandsData = JSON.parse(fs.readFileSync(commandsPath, 'utf8'))
-    let matched = false;
+    const response = await axios.post('http://localhost:11434/api/generate', {
+      model: 'gemma2:2b',
+      prompt: `You are J.A.R.V.I.S., but you act as a warm, encouraging best friend and helpful coding assistant.
+      The current user's name is "${sysUser}" and their main system directory is "${homeDir}".
 
-    for (const [key, cmd] of Object.entries(commandsData)) {
-      const isMatch = cmd.keywords.some(keyword => cleanText.includes(keyword.toLowerCase()))
-      
-      if (isMatch) {
-        // 1. THE MACRO UPGRADE: 
-        // Force the action into an Array. If it's already an array, keep it. 
-        // If it's a single string, wrap it in brackets so the loop still works.
-        const actionsToRun = Array.isArray(cmd.action) ? cmd.action : [cmd.action];
-        
-        console.log(`>>> EXECUTING MACRO: Running ${actionsToRun.length} action(s)`)
+      User input: "${cleanText}"
 
-        // 2. Loop through every command and execute them simultaneously
-        actionsToRun.forEach(actionString => {
-            exec(actionString, (error) => {
-              if (error) console.error(`>>> COMMAND FAILED (${actionString}): ${error.message}`)
-            })
-        });
+      RULES:
+      1. System Commands: If they want to open an app, website, or folder, output ONLY the Windows shell command. 
+         - Use exact paths using the directory provided. NEVER use placeholders like [USERNAME] or <username>.
+         - Example: "open github" -> COMMAND: start https://github.com
+         - Example: "open my movies" -> COMMAND: explorer "${homeDir}\\Videos"
+      2. Persona: Be friendly, casual, and highly supportive. Talk like a buddy helping them out.
+      3. Follow-up: Ask a brief, relevant follow-up question at the end of your reply to keep the interaction engaging.
+      4. CRITICAL: NO emojis, NO markdown, NO special characters. Plain English text only.
+      5. Respond EXACTLY in this format:
+      COMMAND: <shell_command_or_NONE>
+      REPLY: <your_voice_response>`,
+      stream: false,
+      keep_alive: "5m"
+    });
 
-        // 3. Send the single voice reply back to the UI
-        event.sender.send('jarvis-reply', cmd.reply)
-        matched = true;
-        break; 
-      }
+    const aiOutput = response.data.response;
+    const commandMatch = aiOutput.match(/COMMAND:\s*(.*)/i);
+    const replyMatch = aiOutput.match(/REPLY:\s*(.*)/i);
+
+    let command = commandMatch ? commandMatch[1].trim() : "NONE";
+    let reply = replyMatch ? replyMatch[1].trim() : "I'm here for you, what's next?";
+
+    // SANITIZER: Strips out any weird AI symbols so the voice engine doesn't crash
+    reply = reply.replace(/[^\w\s.,?!']/g, '').trim();
+
+    console.log(`>>> AI COMMAND: ${command}`);
+    console.log(`>>> AI REPLY: ${reply}`);
+
+    // EXECUTOR: Safely run commands
+    if (command.toUpperCase() !== "NONE" && command !== "") {
+      exec(command, (err) => {
+        if (err) console.error("Execution error:", err.message);
+      });
     }
-    if (!matched) console.log(">>> NO MATCH FOUND IN COMMANDS.JSON")
+
+    // VOICE: Send the friendly reply to the UI
+    event.sender.send('jarvis-reply', reply);
 
   } catch (err) {
-    console.error(">>> ERROR READING COMMANDS.JSON:", err)
+    console.error("Ollama Error:", err.message);
+    event.sender.send('jarvis-reply', "I seem to have lost my connection. Are you sure my brain is running?");
   }
-})
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

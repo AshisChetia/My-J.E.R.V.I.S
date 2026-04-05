@@ -17,33 +17,52 @@ export default function App() {
   const path2Ref = useRef(null)
   const path3Ref = useRef(null)
 
-  // 1. Setup Local AI Worker & TTS
+  // 1. Setup Local AI Worker (The Ears)
   useEffect(() => {
     workerRef.current = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
     
     workerRef.current.onmessage = (e) => {
       if (e.data.status === 'success') {
+         // This sends your transcribed voice to the Gemma Brain in index.js
          window.api?.executeVoiceCommand(e.data.text)
       }
     }
 
-    if (window.api?.onReply) {
-      window.api.onReply((replyText) => {
-        const now = Date.now()
-        if (now - lastSpokenRef.current < 2000) return; 
-        lastSpokenRef.current = now;
-
-        window.speechSynthesis.cancel() 
-        const speech = new SpeechSynthesisUtterance(replyText)
-        speech.pitch = 0.8 // Lowered pitch for a slightly more intimidating voice
-        speech.rate = 1.1
-        window.speechSynthesis.speak(speech)
-      })
-    }
     return () => workerRef.current?.terminate()
   }, [])
 
-  // 2. Start Hardware & Animation
+  // 2. Setup Text-to-Speech Listener (The Mouth) - FIXED
+  useEffect(() => {
+    const speakReply = (replyText) => {
+      // Prevent stuttering
+      const now = Date.now()
+      if (now - lastSpokenRef.current < 2000) return; 
+      lastSpokenRef.current = now;
+
+      // Speak the reply
+      window.speechSynthesis.cancel() 
+      const speech = new SpeechSynthesisUtterance(replyText)
+      speech.pitch = 0.8 // Deep voice
+      speech.rate = 1.1
+      window.speechSynthesis.speak(speech)
+    }
+
+    // Use your specific API connection
+    if (window.api?.onReply) {
+      window.api.onReply(speakReply)
+    } else if (window.electron?.ipcRenderer) {
+      // Fallback
+      window.electron.ipcRenderer.on('jarvis-reply', (event, text) => speakReply(text))
+    }
+
+    return () => {
+      if (window.electron?.ipcRenderer) {
+        window.electron.ipcRenderer.removeAllListeners('jarvis-reply')
+      }
+    }
+  }, [])
+
+  // 3. Start Hardware & Animation
   const startMic = async () => {
     if (isPressingRef.current || activeStreamRef.current) return; 
     isPressingRef.current = true;
@@ -128,7 +147,7 @@ export default function App() {
     }
   }
 
-  // 3. Stop Hardware
+  // 4. Stop Hardware
   const stopMic = () => {
     if (!isPressingRef.current) return;
     isPressingRef.current = false;
@@ -147,7 +166,7 @@ export default function App() {
     if (path3Ref.current) path3Ref.current.setAttribute('d', flatPath)
   }
 
-  // 4. Hotkeys
+  // 5. Hotkeys
   useEffect(() => {
     if (window.api?.onStartListening) window.api.onStartListening(() => startMic())
     

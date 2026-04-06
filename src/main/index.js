@@ -155,3 +155,14 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
 })
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+// This is the "Nuclear Exit" - it kills all ghost processes
+app.on('before-quit', () => {
+  mainWindow = null;
+});
